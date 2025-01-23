@@ -4,7 +4,7 @@ pipeline {
      DOCKER_REGISTRY = "registry.devops:5000"
      VAULT_ADDR = "http://vault.devops:8200"
      VAULT_PATH_MYSQL="kv/mysql/db"
-     VAULT_TOKEN_MYSQL="s.E6WxeDlyHOkJcDDrgE0E39fu"
+     VAULT_TOKEN_MYSQL="s.kMPSQSKu9XMGZJZenYyFkure"
      MYSQL_STAGING_URL="staging.devops:3306"
      MYSQL_PROD_URL="production.devops:3306"
      MYSQL_DB_NAME="test"
@@ -22,6 +22,32 @@ pipeline {
             '''   
          }
       }
+
+      stage('Code Scanning with Semgrep') {
+         steps {
+            script {
+               // Define directories to scan (frontend and backend in this case)
+               def dirsToScan = ['frontend', 'backend']
+               
+               // Iterate through each directory and run Semgrep
+               dirsToScan.each { dir ->
+                  sh """
+                     echo "Running Semgrep on ${dir}..."
+                     semgrep --config auto --error --exclude node_modules --exclude dist --timeout 300 --json --output ${dir}_semgrep_report.json ${dir}
+                     
+                     # Optionally, fail the pipeline if issues are found
+                     if grep -q '"severity":' ${dir}_semgrep_report.json; then
+                        echo "Semgrep found issues in ${dir}. See ${dir}_semgrep_report.json for details."
+                        exit 1
+                     fi
+                  """
+               }
+            }
+         }
+      }
+
+
+
       stage('Archive') {
          steps {
             parallel(
@@ -85,7 +111,7 @@ pipeline {
                      remote.user = 'vagrant'
                      remote.allowAnyHosts = true
                      remote.host = 'staging.devops'
-                     remote.identityFile = '~/.ssh/staging.key'
+                     remote.identityFile = '~/.ssh/staging.key'MYSQL_DB_PASSWORD
                      sshCommand remote: remote, command: "docker stop mysqldb backend frontend || true"
                      sshCommand remote: remote, command: "docker rm backend mysqldb frontend || true"
                      sshCommand remote: remote, command: "docker rmi ${DOCKER_REGISTRY}/devops/api:staging ${DOCKER_REGISTRY}/devops/ui:staging || true"
@@ -119,6 +145,59 @@ pipeline {
             }
          }
       }
+
+      // stage('Staging Deploy') {
+      //    steps {   
+      //       sh '''
+      //             sleep 5
+      //       '''
+      //       script {
+      //             def remote = [:]
+      //             remote.name = 'staging'
+      //             remote.user = 'vagrant'
+      //             remote.allowAnyHosts = true
+      //             remote.host = 'staging.devops'
+      //             remote.identityFile = '~/.ssh/staging.key'
+                  
+      //             // Create a Docker network for container communication
+      //             sshCommand remote: remote, command: "docker network create devops-network || true"
+                  
+      //             // Start the MySQL container if not running
+      //             sshCommand remote: remote, command: """
+      //                docker run -d --network devops-network --name mysqldb \
+      //                -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DB_USER=${MYSQL_DB_USER} \
+      //                -e MYSQL_DB_PASSWORD=${MYSQL_DB_PASSWORD} -e MYSQL_DB_NAME=${MYSQL_DB_NAME} \
+      //                mysql:5.7
+      //             """
+                  
+      //             // Wait for MySQL to be ready
+      //             sshCommand remote: remote, command: """
+      //                for i in {1..10}; do
+      //                   docker exec mysqldb mysqladmin ping -u${MYSQL_DB_USER} -p${MYSQL_DB_PASSWORD} && break || sleep 5;
+      //                done
+      //             """
+
+      //             // Start the backend container
+      //             sshCommand remote: remote, command: """
+      //                docker run -d -p 8080:8080 --network devops-network \
+      //                -e MYSQL_DB_USER=${MYSQL_DB_USER} \
+      //                -e MYSQL_DB_PASSWORD=${MYSQL_DB_PASSWORD} \
+      //                -e MYSQL_JDBC_URL=jdbc:mysql://mysqldb:3306/${MYSQL_DB_NAME} \
+      //                -e MYSQL_DB_NAME=${MYSQL_DB_NAME} \
+      //                -v /home/vagrant/logs:/home/boot/logs/ --name backend \
+      //                ${DOCKER_REGISTRY}/devops/api:staging
+      //             """
+                  
+      //             // Start the frontend container
+      //             sshCommand remote: remote, command: """
+      //                docker run -d -p 80:80 --network devops-network \
+      //                --name frontend ${DOCKER_REGISTRY}/devops/ui:staging
+      //             """
+      //       }
+      //    }
+      // }
+
+
       stage('UAT Tests') {
          steps {   
                echo 'UAT Tests'
